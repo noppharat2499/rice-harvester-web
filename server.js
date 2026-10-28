@@ -31,12 +31,19 @@ const LINE_OA_ID = process.env.LINE_OA_ID || '@248auqee';
 pg.types.setTypeParser(1700, (v) => (v === null ? null : parseFloat(v)));
 pg.types.setTypeParser(1082, (v) => v);
 
+// ใช้ DATABASE_URL ได้ (บริการฐานข้อมูลออนไลน์ส่วนใหญ่ให้มา) ไม่ตั้งก็ใช้ค่า DB_* แบบเดิม
+// DB_SSL=1 เมื่อฐานข้อมูลบังคับเชื่อมต่อแบบเข้ารหัส
 const pool = new pg.Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: Number(process.env.DB_PORT) || 5432,
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME || 'rice_harvester_db',
+  ...(process.env.DATABASE_URL
+    ? { connectionString: process.env.DATABASE_URL }
+    : {
+        host: process.env.DB_HOST || 'localhost',
+        port: Number(process.env.DB_PORT) || 5432,
+        user: process.env.DB_USER || 'postgres',
+        password: process.env.DB_PASSWORD,
+        database: process.env.DB_NAME || 'rice_harvester_db',
+      }),
+  ...(process.env.DB_SSL === '1' ? { ssl: { rejectUnauthorized: false } } : {}),
 });
 pool.on('error', (err) => console.error('❌ PostgreSQL error:', err.message));
 
@@ -50,6 +57,17 @@ try {
 }
 
 const app = express();
+// อยู่หลัง nginx/proxy: ตั้ง TRUST_PROXY=1 เพื่อให้ระบบกันเดารหัสผ่านเห็น IP จริงของผู้ใช้
+if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'X-Frame-Options': 'SAMEORIGIN',
+  });
+  next();
+});
 app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:5173' }));
 // เก็บ body ดิบของ webhook ไว้ตรวจลายเซ็น LINE (ต้องใช้ไบต์ต้นฉบับ)
 app.use(
@@ -61,7 +79,8 @@ app.use(
 );
 
 // ---------- โฟลเดอร์เก็บรูปถ่ายงานซ่อม ----------
-const UPLOAD_DIR = path.join(__dirname, 'uploads');
+// UPLOAD_DIR: ตั้งเป็นโฟลเดอร์ของดิสก์ถาวร (เช่น /var/data/uploads) ตอน deploy; ไม่ตั้งก็ใช้ ./uploads
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 const MAX_PHOTOS_PER_REPAIR = 12;
