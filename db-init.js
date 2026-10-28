@@ -26,19 +26,24 @@ if (!/^[A-Za-z0-9_]+$/.test(dbName)) {
   process.exit(1);
 }
 
-// 1) สร้างฐานข้อมูลถ้ายังไม่มี
-const admin = new Client({ ...base, database: 'postgres' });
-await admin.connect();
-const exists = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName]);
-if (exists.rowCount === 0) {
-  await admin.query(`CREATE DATABASE ${dbName}`);
-  console.log(`✅ สร้างฐานข้อมูล ${dbName} แล้ว`);
-} else {
-  console.log(`ℹ️  ฐานข้อมูล ${dbName} มีอยู่แล้ว`);
+// 1) สร้างฐานข้อมูลถ้ายังไม่มี (ถ้าใช้ DATABASE_URL ถือว่าฐานข้อมูลถูกสร้างไว้แล้วโดยผู้ให้บริการ)
+const ssl = process.env.DB_SSL === '1' ? { ssl: { rejectUnauthorized: false } } : {};
+if (!process.env.DATABASE_URL) {
+  const admin = new Client({ ...base, ...ssl, database: 'postgres' });
+  await admin.connect();
+  const exists = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName]);
+  if (exists.rowCount === 0) {
+    await admin.query(`CREATE DATABASE ${dbName}`);
+    console.log(`✅ สร้างฐานข้อมูล ${dbName} แล้ว`);
+  } else {
+    console.log(`ℹ️  ฐานข้อมูล ${dbName} มีอยู่แล้ว`);
+  }
+  await admin.end();
 }
-await admin.end();
 
-const db = new Client({ ...base, database: dbName });
+const db = process.env.DATABASE_URL
+  ? new Client({ connectionString: process.env.DATABASE_URL, ...ssl })
+  : new Client({ ...base, ...ssl, database: dbName });
 await db.connect();
 
 try {
